@@ -24,9 +24,72 @@ const int   daylightOffset_sec = 3600; // Ora legale (+1 ora)
 const char* indirizzoPubblico = "0x5D9C88BEE400E5daA9Fa7fe2A0D010F669363D00";
 const char* indirizzoContratto = "0xd9145CCE52D386f254917e481eB44e9943F39138";
 const char* chiavePrivata = SECRET_ETH_PRIVATE_KEY;
-//const char* urlRPC = SECRET_RPC_URL;
+const char* urlRPC = SECRET_RPC_URL;
 volatile bool pulsantePremuto = false;
 
+void ottieniDettagliTransazione(String txHash, const char* rpcUrl) {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("Errore: WiFi disconnesso.");
+    return;
+  }
+  HTTPClient http;
+  Serial.println("Interrogazione della blockchain per la transazione...");
+  http.begin(rpcUrl); 
+  http.addHeader("Content-Type", "application/json");
+  JsonDocument doc;
+  doc["jsonrpc"] = "2.0";
+  doc["method"] = "eth_getTransactionByHash";
+  JsonArray params = doc["params"].to<JsonArray>();
+  params.add(txHash);
+  doc["id"] = 1;
+  String requestBody;
+  serializeJson(doc, requestBody);
+  int httpResponseCode = http.POST(requestBody);
+  if (httpResponseCode > 0) {
+    String response = http.getString();
+    JsonDocument responseDoc; 
+    DeserializationError error = deserializeJson(responseDoc, response);
+    if (error) {
+      Serial.print("Errore nel parsing JSON: ");
+      Serial.println(error.c_str());
+      http.end();
+      return;
+    }
+    JsonObject result = responseDoc["result"];
+    if (result.isNull()) {
+      Serial.println("Transazione non trovata o ancora in attesa (Pending) nella mempool.");
+    } else {
+      Serial.println("\n--- Dettagli Transazione ---");
+ 
+      const char* blockHex = result["blockNumber"];
+      long blockDec = strtol(blockHex, NULL, 16);
+      
+      Serial.print("Blocco (Hex): "); Serial.print(blockHex);
+      Serial.print(" -> (Decimale): "); Serial.println(blockDec);
+      
+      Serial.print("Mittente (From): "); 
+      Serial.println(result["from"].as<const char*>());
+      
+      Serial.print("Destinatario (To): "); 
+      Serial.println(result["to"].as<const char*>());
+      
+      Serial.print("Gas Fornito: "); 
+      Serial.println(strtol(result["gas"].as<const char*>(), NULL, 16));
+      
+      Serial.print("Valore (Wei Hex): "); 
+      Serial.println(result["value"].as<const char*>());
+      
+      Serial.print("Dati Payload (Input): "); 
+      Serial.println(result["input"].as<const char*>());
+      
+      Serial.println("----------------------------\n");
+    }
+  } else {
+    Serial.print("Errore nella richiesta HTTP: ");
+    Serial.println(httpResponseCode);
+  }
+  http.end();
+}
 void IRAM_ATTR Click() {
   pulsantePremuto = true;
 }
@@ -40,8 +103,8 @@ void stampaSaldoETH() {
   Serial.print(saldoETH, 6);
   Serial.println(" ETH");
 }
-void inviaSuEthereum(String cid_IPFS) {
-  Serial.println("\nInvio su Ethereum");
+String inviaSuEthereum(String cid_IPFS) {
+  Serial.println("Invio su Ethereum");
   Serial.println("Avvio transazione per il CID: " + cid_IPFS);
   Web3 web3(11155111);
   Contract contract(&web3, indirizzoContratto);
@@ -81,7 +144,28 @@ void inviaSuEthereum(String cid_IPFS) {
       &datiPayload
   );
   Serial.print("Transazione inviata! Hash (TxID): ");
-  Serial.println(hashTransazione.c_str());
+  String rispostaGrezza = String(hashTransazione.c_str());
+  int jsonStart = rispostaGrezza.indexOf('{');
+  int jsonEnd = rispostaGrezza.lastIndexOf('}');
+  if (jsonStart == -1 || jsonEnd == -1 || jsonEnd < jsonStart) {
+    Serial.println("Errore: risposta SendTransaction non valida.");
+    return "";
+  }
+  String rispostaJson = rispostaGrezza.substring(jsonStart, jsonEnd + 1);
+  JsonDocument txDoc;
+  DeserializationError err = deserializeJson(txDoc, rispostaJson);
+  if (err) {
+    Serial.print("Errore parsing risposta SendTransaction: ");
+    Serial.println(err.c_str());
+    return "";
+  }
+  String resultHash = txDoc["result"].as<String>();
+  if (resultHash.length() == 0) {
+    Serial.println("Errore: campo 'result' assente nella risposta SendTransaction.");
+    return "";
+  }
+  Serial.println(resultHash);
+  return resultHash;
 }
 void exe() {
   digitalWrite(ledPin, HIGH);
@@ -129,9 +213,10 @@ void exe() {
       JsonDocument responseDoc;
       deserializeJson(responseDoc, response);
       String cid = responseDoc["IpfsHash"].as<String>();
-      Serial.print("\nSalvato su IPFS! CID generato: ");
+      Serial.print("Salvato su IPFS! CID generato: ");
       Serial.println(cid);
-      inviaSuEthereum(cid);
+      String resultSendTx = inviaSuEthereum(cid);
+      
     } else {
       Serial.print("Errore nella richiesta HTTP: ");
       Serial.println(httpResponseCode);
@@ -141,6 +226,7 @@ void exe() {
     Serial.println("Errore: Wi-Fi disconnesso.");
   }
   digitalWrite(ledPin, LOW);
+  pulsantePremuto = false;
 }
 void setup() {
   Serial.begin(115200);
@@ -160,10 +246,10 @@ void setup() {
   Serial.println("Ora sincronizzata con NTP.");
   stampaSaldoETH();
   attachInterrupt(digitalPinToInterrupt(buttonPin), Click, FALLING);
+  Serial.println("Premere il pulsante per inviare la lettura del sensore DHT11 a IPFS e a Blockchain Ethereum");
 }
 void loop() {
   if (pulsantePremuto) {
-    pulsantePremuto = false;
     Serial.println("Sistema in azione...");
     exe();
   }
