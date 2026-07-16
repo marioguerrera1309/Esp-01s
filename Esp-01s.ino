@@ -6,13 +6,13 @@
 #include <Web3.h>
 #include <Contract.h>
 #include "secrets.h"
-
 const char* ssid = SECRET_SSID;
 const char* password = SECRET_PASS;
 #define DHTPIN 4     
 #define DHTTYPE DHT11   
 DHT dht(DHTPIN, DHTTYPE);
 const int ledPin = 2;
+const int buttonPin = 12;
 // Configurazione IPFS
 const String pinataJWT = SECRET_PINATA_JWT;
 const char* pinataEndpoint = "https://api.pinata.cloud/pinning/pinJSONToIPFS";
@@ -25,7 +25,11 @@ const char* indirizzoPubblico = "0x5D9C88BEE400E5daA9Fa7fe2A0D010F669363D00";
 const char* indirizzoContratto = "0xd9145CCE52D386f254917e481eB44e9943F39138";
 const char* chiavePrivata = SECRET_ETH_PRIVATE_KEY;
 //const char* urlRPC = SECRET_RPC_URL;
+volatile bool pulsantePremuto = false;
 
+void IRAM_ATTR Click() {
+  pulsantePremuto = true;
+}
 void stampaSaldoETH() {
   Web3 web3(11155111);
   std::string indirizzo = std::string(indirizzoPubblico);
@@ -79,24 +83,7 @@ void inviaSuEthereum(String cid_IPFS) {
   Serial.print("Transazione inviata! Hash (TxID): ");
   Serial.println(hashTransazione.c_str());
 }
-void setup() {
-  Serial.begin(115200);
-  dht.begin(); 
-  pinMode(ledPin, OUTPUT);
-  Serial.print("Connessione a ");
-  Serial.println(ssid);
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println("\nWiFi connesso!");
-  // Sincronizzazione dell'orologio interno dell'ESP32 tramite server NTP internet
-  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
-  Serial.println("Ora sincronizzata con NTP.");
-  stampaSaldoETH();
-}
-void loop() {
+void exe() {
   digitalWrite(ledPin, HIGH);
   delay(1000);
   float tempCelsius = dht.readTemperature();
@@ -154,5 +141,30 @@ void loop() {
     Serial.println("Errore: Wi-Fi disconnesso.");
   }
   digitalWrite(ledPin, LOW);
-  delay(120000); 
+}
+void setup() {
+  Serial.begin(115200);
+  dht.begin(); 
+  pinMode(ledPin, OUTPUT);
+  pinMode(buttonPin, INPUT_PULLUP);
+  Serial.print("Connessione a ");
+  Serial.println(ssid);
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nWiFi connesso!");
+  // Sincronizzazione dell'orologio interno dell'ESP32 tramite server NTP internet
+  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+  Serial.println("Ora sincronizzata con NTP.");
+  stampaSaldoETH();
+  attachInterrupt(digitalPinToInterrupt(buttonPin), Click, FALLING);
+}
+void loop() {
+  if (pulsantePremuto) {
+    pulsantePremuto = false;
+    Serial.println("Sistema in azione...");
+    exe();
+  }
 }
