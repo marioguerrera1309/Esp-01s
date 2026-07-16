@@ -27,14 +27,14 @@ const char* chiavePrivata = SECRET_ETH_PRIVATE_KEY;
 const char* urlRPC = SECRET_RPC_URL;
 volatile bool pulsantePremuto = false;
 
-void ottieniDettagliTransazione(String txHash, const char* rpcUrl) {
+void getTransazione(String txHash) {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("Errore: WiFi disconnesso.");
     return;
   }
   HTTPClient http;
   Serial.println("Interrogazione della blockchain per la transazione...");
-  http.begin(rpcUrl); 
+  http.begin(urlRPC); 
   http.addHeader("Content-Type", "application/json");
   JsonDocument doc;
   doc["jsonrpc"] = "2.0";
@@ -60,28 +60,20 @@ void ottieniDettagliTransazione(String txHash, const char* rpcUrl) {
       Serial.println("Transazione non trovata o ancora in attesa (Pending) nella mempool.");
     } else {
       Serial.println("\n--- Dettagli Transazione ---");
- 
       const char* blockHex = result["blockNumber"];
       long blockDec = strtol(blockHex, NULL, 16);
-      
       Serial.print("Blocco (Hex): "); Serial.print(blockHex);
       Serial.print(" -> (Decimale): "); Serial.println(blockDec);
-      
       Serial.print("Mittente (From): "); 
       Serial.println(result["from"].as<const char*>());
-      
       Serial.print("Destinatario (To): "); 
       Serial.println(result["to"].as<const char*>());
-      
       Serial.print("Gas Fornito: "); 
       Serial.println(strtol(result["gas"].as<const char*>(), NULL, 16));
-      
       Serial.print("Valore (Wei Hex): "); 
       Serial.println(result["value"].as<const char*>());
-      
       Serial.print("Dati Payload (Input): "); 
       Serial.println(result["input"].as<const char*>());
-      
       Serial.println("----------------------------\n");
     }
   } else {
@@ -247,6 +239,7 @@ void setup() {
   stampaSaldoETH();
   attachInterrupt(digitalPinToInterrupt(buttonPin), Click, FALLING);
   Serial.println("Premere il pulsante per inviare la lettura del sensore DHT11 a IPFS e a Blockchain Ethereum");
+  getTransazione("0x837f3105c4970f81941cd5f38f91322ebf9b3a8c826501771d95cff1306e6c44");
 }
 void loop() {
   if (pulsantePremuto) {
