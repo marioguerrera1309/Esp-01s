@@ -27,12 +27,100 @@ const char* chiavePrivata = SECRET_ETH_PRIVATE_KEY;
 const char* urlRPC = SECRET_RPC_URL;
 volatile bool pulsantePremuto = false;
 
-void getTransazione(String txHash) {
+String estraiCID(String payload) {
+  if (payload.startsWith("0x")) {
+    payload = payload.substring(2);
+  }
+  if (payload.length() < 136) {
+    return "";
+  }
+  String hexLength = payload.substring(72, 136);
+  int cidLength = strtol(hexLength.c_str(), NULL, 16);
+  // Calcola dove iniziano e finiscono i dati effettivi
+  int startIdx = 136;
+  int endIdx = startIdx + (cidLength * 2); // *2 perché ogni carattere ASCII sono 2 HEX
+  if (payload.length() < endIdx) return "";
+  String hexCID = payload.substring(startIdx, endIdx);
+  // Converte la stringa esadecimale in caratteri ASCII
+  String cid = "";
+  for (int i = 0; i < hexCID.length(); i += 2) {
+    String byteString = hexCID.substring(i, i + 2);
+    char c = (char) strtol(byteString.c_str(), NULL, 16);
+    cid += c;
+  }
+  return cid;
+}
+
+void leggiDatiDaIPFS(String cid) {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("Errore: WiFi disconnesso.");
     return;
   }
+  WiFiClientSecure client;
+  client.setInsecure(); 
+  client.setHandshakeTimeout(30000); 
   HTTPClient http;
+  String url = "https://dweb.link/ipfs/" + cid;
+  Serial.println("Scaricamento dati da IPFS: " + url);
+  if (!http.begin(client, url)) {
+    Serial.println("Errore inizializzazione HTTP");
+    return;
+  }
+  http.setTimeout(15000);
+  const char * headerKeys[] = {"Location"};
+  http.collectHeaders(headerKeys, 1);
+  int httpResponseCode = http.GET();
+  if (httpResponseCode == HTTP_CODE_MOVED_PERMANENTLY || httpResponseCode == HTTP_CODE_FOUND || httpResponseCode == 307 || httpResponseCode == 308) {
+    String newUrl = http.header("Location");
+    Serial.println("Server reindirizza a: " + newUrl);
+    http.end(); 
+    if (!http.begin(client, newUrl)) {
+      Serial.println("Errore inizializzazione HTTP verso il nuovo URL");
+      return;
+    }
+    httpResponseCode = http.GET(); 
+  }
+  if (httpResponseCode > 0) {
+    String response = http.getString();
+    Serial.print("Codice HTTP: ");
+    Serial.println(httpResponseCode);
+    Serial.println("Risposta da IPFS:");
+    Serial.println(response);
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, response);
+    if (error) {
+      Serial.print("Errore nel parsing del JSON da IPFS: ");
+      Serial.println(error.c_str());
+    } else {
+      float temperatura = doc["temperature"];
+      String unita = doc["unit"];
+      long timestamp = doc["timestamp"];
+      Serial.println("--- Dati Sensore Estratti ---");
+      Serial.print("CID IPFS: "); Serial.println(cid);
+      Serial.print("Temperatura: ");
+      Serial.print(temperatura);
+      Serial.println(" °" + unita);
+      Serial.print("Timestamp: ");
+      time_t time = (time_t)timestamp;
+      struct tm * timeinfo = localtime(&time);
+      char buffer[80];
+      strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", timeinfo);
+      Serial.println(buffer);
+      Serial.println("-----------------------------");
+    }
+  } else {
+    Serial.print("Errore richiesta HTTP a IPFS (Codice): ");
+    Serial.println(httpResponseCode);
+  }
+  http.end();
+}
+String getTransazione(String txHash) {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("Errore: WiFi disconnesso.");
+    return "";
+  }
+  HTTPClient http;
+  delay(100);
   Serial.println("Interrogazione della blockchain per la transazione...");
   http.begin(urlRPC); 
   http.addHeader("Content-Type", "application/json");
@@ -53,13 +141,14 @@ void getTransazione(String txHash) {
       Serial.print("Errore nel parsing JSON: ");
       Serial.println(error.c_str());
       http.end();
-      return;
+      return "";
     }
     JsonObject result = responseDoc["result"];
     if (result.isNull()) {
       Serial.println("Transazione non trovata o ancora in attesa (Pending) nella mempool.");
+      return "";
     } else {
-      Serial.println("\n--- Dettagli Transazione ---");
+      Serial.println("--- Dettagli Transazione ---");
       const char* blockHex = result["blockNumber"];
       long blockDec = strtol(blockHex, NULL, 16);
       Serial.print("Blocco (Hex): "); Serial.print(blockHex);
@@ -73,14 +162,18 @@ void getTransazione(String txHash) {
       Serial.print("Valore (Wei Hex): "); 
       Serial.println(result["value"].as<const char*>());
       Serial.print("Dati Payload (Input): "); 
-      Serial.println(result["input"].as<const char*>());
-      Serial.println("----------------------------\n");
+      String inputData = result["input"].as<const char*>();
+      Serial.println(inputData);
+      Serial.println("----------------------------");
+      return inputData;
     }
   } else {
     Serial.print("Errore nella richiesta HTTP: ");
     Serial.println(httpResponseCode);
+    return "";
   }
   http.end();
+  return "";
 }
 void IRAM_ATTR Click() {
   pulsantePremuto = true;
@@ -208,7 +301,12 @@ void exe() {
       Serial.print("Salvato su IPFS! CID generato: ");
       Serial.println(cid);
       String resultSendTx = inviaSuEthereum(cid);
-      
+      delay(120000); // Attendere 5 secondi per la propagazione della transazione
+      String inputData = getTransazione(resultSendTx);
+      String estrattoCID = estraiCID(inputData);
+      Serial.print("CID estratto dalla transazione Ethereum: ");
+      Serial.println(estrattoCID);
+      leggiDatiDaIPFS(estrattoCID);
     } else {
       Serial.print("Errore nella richiesta HTTP: ");
       Serial.println(httpResponseCode);
@@ -239,7 +337,11 @@ void setup() {
   stampaSaldoETH();
   attachInterrupt(digitalPinToInterrupt(buttonPin), Click, FALLING);
   Serial.println("Premere il pulsante per inviare la lettura del sensore DHT11 a IPFS e a Blockchain Ethereum");
-  getTransazione("0x837f3105c4970f81941cd5f38f91322ebf9b3a8c826501771d95cff1306e6c44");
+  // String inputData = getTransazione("0x837f3105c4970f81941cd5f38f91322ebf9b3a8c826501771d95cff1306e6c44");
+  // String estrattoCID = estraiCID(inputData);
+  // Serial.print("CID estratto dalla transazione Ethereum: ");
+  // Serial.println(estrattoCID);
+  // leggiDatiDaIPFS(estrattoCID);
 }
 void loop() {
   if (pulsantePremuto) {
