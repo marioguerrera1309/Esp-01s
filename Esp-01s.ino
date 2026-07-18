@@ -15,40 +15,71 @@ const int ledPin = 2;
 const int buttonPin = 12;
 // Configurazione IPFS
 const String pinataJWT = SECRET_PINATA_JWT;
-const char* pinataEndpoint = "https://api.pinata.cloud/pinning/pinJSONToIPFS";
+const char* pinataEndpoint = SECRET_PINATA_ENDPOINT;
 // Server NTP per il Timestamp
 const char* ntpServer = "pool.ntp.org";
 const long  gmtOffset_sec = 3600; // Fuso orario italiano
 const int   daylightOffset_sec = 3600; // Ora legale (+1 ora)
 // Configurazione Ethereum
-const char* indirizzoPubblico = "0x5D9C88BEE400E5daA9Fa7fe2A0D010F669363D00";
-const char* indirizzoContratto = "0xad24C7b3b3Da19774914D9C5C5521daAC4AA7672";
+const char* indirizzoPubblico = PUBLIC_ADDRESS;
+const char* indirizzoContratto = SECRET_CONTRACT_ADDRESS;
 const char* chiavePrivata = SECRET_ETH_PRIVATE_KEY;
 const char* urlRPC = SECRET_RPC_URL;
+const char* currentCIDFunctionAddress = SECRET_CURRENT_CID_FUNCTION_ADDRESS;
 volatile bool pulsantePremuto = false;
+std::string updateCIDFunctionAddress = SECRET_UPDATE_CID_FUNCTION_ADDRESS;
 
-String estraiCID(String payload) {
-  if (payload.startsWith("0x")) {
-    payload = payload.substring(2);
-  }
-  if (payload.length() < 136) {
+String leggiUltimoCID() {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("Errore: Wi-Fi disconnesso.");
     return "";
   }
-  String hexLength = payload.substring(72, 136);
-  int cidLength = strtol(hexLength.c_str(), NULL, 16);
-  // Calcola dove iniziano e finiscono i dati effettivi
-  int startIdx = 136;
-  int endIdx = startIdx + (cidLength * 2); // *2 perché ogni carattere ASCII sono 2 HEX
-  if (payload.length() < endIdx) return "";
-  String hexCID = payload.substring(startIdx, endIdx);
-  // Converte la stringa esadecimale in caratteri ASCII
-  String cid = "";
-  for (int i = 0; i < hexCID.length(); i += 2) {
-    String byteString = hexCID.substring(i, i + 2);
-    char c = (char) strtol(byteString.c_str(), NULL, 16);
-    cid += c;
+  HTTPClient http;
+  String cidDecodificato = "";
+  Serial.println("Richiesta a Ethereum: Lettura di currentCID()...");
+  http.begin(urlRPC);
+  http.addHeader("Content-Type", "application/json");
+  // JSON per la chiamata RPC (eth_call)
+  String jsonRequest = "{\"jsonrpc\":\"2.0\",\"method\":\"eth_call\",\"params\":[{\"to\":\"" + 
+                       String(indirizzoContratto) + 
+                       "\",\"data\":\"0x3e42d485\"},\"latest\"],\"id\":1}";
+  int httpResponseCode = http.POST(jsonRequest);
+  if (httpResponseCode == 200) {
+    String response = http.getString();
+    JsonDocument doc;
+    deserializeJson(doc, response);
+    String rawResult = doc["result"].as<String>(); // Payload in esadecimale
+    if (rawResult == "0x" || rawResult.length() < 130) {
+      Serial.println("Nessun CID trovato o contratto vuoto.");
+    } else {
+      // DECODIFICA ABI (Application Binary Interface)
+      // rawResult contiene:
+      // - 2 caratteri per "0x"
+      // - 64 caratteri per l'offset
+      // - 64 caratteri per la lunghezza della stringa
+      // - N caratteri per la stringa vera e propria in Esadecimale
+      // Salta i primi 130 caratteri per arrivare ai dati puri
+      String cidHex = rawResult.substring(130);
+      // Converte i byte esadecimali in caratteri ASCII testuali
+      for (int i = 0; i < cidHex.length(); i += 2) {
+        String byteString = cidHex.substring(i, i + 2);
+        char c = (char) strtol(byteString.c_str(), NULL, 16);
+        // Ignoriamo il padding finale (caratteri nulli)
+        if (c != 0) {
+          cidDecodificato += c;
+        }
+      }
+      Serial.print("CID Recuperato: ");
+      Serial.println(cidDecodificato);
+    }
+  } else {
+    Serial.print("Errore nella richiesta HTTP: ");
+    Serial.println(httpResponseCode);
+    Serial.println(http.getString());
+    return "";
   }
-  return cid;
+  http.end();
+  return cidDecodificato;
 }
 
 void leggiDatiDaIPFS(String cid) {
@@ -60,7 +91,7 @@ void leggiDatiDaIPFS(String cid) {
   client.setInsecure(); 
   client.setHandshakeTimeout(30000); 
   HTTPClient http;
-  String url = "https://dweb.link/ipfs/" + cid;
+  String url = "https://aqua-fashionable-grouse-350.mypinata.cloud/ipfs/" + cid;
   Serial.println("Scaricamento dati da IPFS: " + url);
   if (!http.begin(client, url)) {
     Serial.println("Errore inizializzazione HTTP");
@@ -70,16 +101,6 @@ void leggiDatiDaIPFS(String cid) {
   const char * headerKeys[] = {"Location"};
   http.collectHeaders(headerKeys, 1);
   int httpResponseCode = http.GET();
-  if (httpResponseCode == HTTP_CODE_MOVED_PERMANENTLY || httpResponseCode == HTTP_CODE_FOUND || httpResponseCode == 307 || httpResponseCode == 308) {
-    String newUrl = http.header("Location");
-    Serial.println("Server reindirizza a: " + newUrl);
-    http.end(); 
-    if (!http.begin(client, newUrl)) {
-      Serial.println("Errore inizializzazione HTTP verso il nuovo URL");
-      return;
-    }
-    httpResponseCode = http.GET(); 
-  }
   if (httpResponseCode > 0) {
     String response = http.getString();
     Serial.print("Codice HTTP: ");
@@ -96,7 +117,6 @@ void leggiDatiDaIPFS(String cid) {
       String unita = doc["unit"];
       long timestamp = doc["timestamp"];
       Serial.println("--- Dati Sensore Estratti ---");
-      Serial.print("CID IPFS: "); Serial.println(cid);
       Serial.print("Temperatura: ");
       Serial.print(temperatura);
       Serial.println(" °" + unita);
@@ -114,6 +134,7 @@ void leggiDatiDaIPFS(String cid) {
   }
   http.end();
 }
+
 String getTransazione(String txHash) {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("Errore: WiFi disconnesso.");
@@ -175,9 +196,11 @@ String getTransazione(String txHash) {
   http.end();
   return "";
 }
+
 void IRAM_ATTR Click() {
   pulsantePremuto = true;
 }
+
 void stampaSaldoETH() {
   Web3 web3(11155111);
   std::string indirizzo = std::string(indirizzoPubblico);
@@ -188,6 +211,7 @@ void stampaSaldoETH() {
   Serial.print(saldoETH, 6);
   Serial.println(" ETH");
 }
+
 String inviaSuEthereum(String cid_IPFS) {
   Serial.println("Invio su Ethereum");
   Serial.println("Avvio transazione per il CID: " + cid_IPFS);
@@ -202,7 +226,7 @@ String inviaSuEthereum(String cid_IPFS) {
   uint32_t nonce = web3.EthGetTransactionCount(&indirizzoMittente); // Il nonce è il numero di transazioni inviate dall'indirizzo
   std::string indirizzoDestinatario = std::string(indirizzoContratto); // Convertiamo l'indirizzo del contratto in std::string
   uint256_t valoreEth = 0;
-  std::string datiPayload = "0x07cce946"; // Funzione updateCID(string) in formato Ascii HEX (4 byte)
+  std::string datiPayload = updateCIDFunctionAddress; // Funzione updateCID(string) in formato Ascii HEX (4 byte)
   // offset stringa
   datiPayload += 
   "0000000000000000000000000000000000000000000000000000000000000020";
@@ -252,6 +276,7 @@ String inviaSuEthereum(String cid_IPFS) {
   Serial.println(resultHash);
   return resultHash;
 }
+
 void exe() {
   digitalWrite(ledPin, HIGH);
   delay(1000);
@@ -302,12 +327,10 @@ void exe() {
       Serial.println(cid);
       String resultSendTx = inviaSuEthereum(cid);
       Serial.println("Attendere 2 minuti per la propagazione della transazione sulla blockchain Ethereum...");
-      delay(120000); // Attendere 2 minuti per la propagazione della transazione
+      delay(30000); // Attendere 2 minuti per la propagazione della transazione
       String inputData = getTransazione(resultSendTx);
-      String estrattoCID = estraiCID(inputData);
-      Serial.print("CID estratto dalla transazione Ethereum: ");
-      Serial.println(estrattoCID);
-      leggiDatiDaIPFS(estrattoCID);
+      String ultimoCID = leggiUltimoCID();
+      leggiDatiDaIPFS(ultimoCID);
     } else {
       Serial.print("Errore nella richiesta HTTP: ");
       Serial.println(httpResponseCode);
@@ -319,6 +342,7 @@ void exe() {
   digitalWrite(ledPin, LOW);
   pulsantePremuto = false;
 }
+
 void setup() {
   Serial.begin(115200);
   dht.begin(); 
@@ -338,12 +362,8 @@ void setup() {
   stampaSaldoETH();
   attachInterrupt(digitalPinToInterrupt(buttonPin), Click, FALLING);
   Serial.println("Premere il pulsante per inviare la lettura del sensore DHT11 a IPFS e a Blockchain Ethereum");
-  // String inputData = getTransazione("0x837f3105c4970f81941cd5f38f91322ebf9b3a8c826501771d95cff1306e6c44");
-  // String estrattoCID = estraiCID(inputData);
-  // Serial.print("CID estratto dalla transazione Ethereum: ");
-  // Serial.println(estrattoCID);
-  // leggiDatiDaIPFS(estrattoCID);
 }
+
 void loop() {
   if (pulsantePremuto) {
     Serial.println("Sistema in azione...");
