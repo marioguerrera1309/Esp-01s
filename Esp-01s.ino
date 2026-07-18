@@ -22,7 +22,7 @@ const long  gmtOffset_sec = 3600; // Fuso orario italiano
 const int   daylightOffset_sec = 3600; // Ora legale (+1 ora)
 // Configurazione Ethereum
 const char* indirizzoPubblico = "0x5D9C88BEE400E5daA9Fa7fe2A0D010F669363D00";
-const char* indirizzoContratto = "0xd9145CCE52D386f254917e481eB44e9943F39138";
+const char* indirizzoContratto = "0xad24C7b3b3Da19774914D9C5C5521daAC4AA7672";
 const char* chiavePrivata = SECRET_ETH_PRIVATE_KEY;
 const char* urlRPC = SECRET_RPC_URL;
 volatile bool pulsantePremuto = false;
@@ -191,18 +191,18 @@ void stampaSaldoETH() {
 String inviaSuEthereum(String cid_IPFS) {
   Serial.println("Invio su Ethereum");
   Serial.println("Avvio transazione per il CID: " + cid_IPFS);
-  Web3 web3(11155111);
-  Contract contract(&web3, indirizzoContratto);
-  contract.SetPrivateKey(chiavePrivata);
+  Web3 web3(11155111); // Connessione alla rete Sepolia
+  Contract contract(&web3, indirizzoContratto); // Indirizzo del contratto
+  contract.SetPrivateKey(chiavePrivata); // Imposta la chiave privata per firmare la transazione
   //String firmaFunzione = "updateCID(string)";
   //String parametri = "[\"" + cid_IPFS + "\"]"; 
   Serial.println("Firma e invio transazione in corso...");
-  std::string indirizzoStr = std::string(indirizzoPubblico);
+  std::string indirizzoStr = std::string(indirizzoPubblico); // Convertiamo l'indirizzo pubblico in std::string
   std::string indirizzoMittente = std::string(indirizzoPubblico);
-  uint32_t nonce = web3.EthGetTransactionCount(&indirizzoMittente);
-  std::string indirizzoDestinatario = std::string(indirizzoContratto);
+  uint32_t nonce = web3.EthGetTransactionCount(&indirizzoMittente); // Il nonce è il numero di transazioni inviate dall'indirizzo
+  std::string indirizzoDestinatario = std::string(indirizzoContratto); // Convertiamo l'indirizzo del contratto in std::string
   uint256_t valoreEth = 0;
-  std::string datiPayload = "0x07cce946";
+  std::string datiPayload = "0x07cce946"; // Funzione updateCID(string) in formato Ascii HEX (4 byte)
   // offset stringa
   datiPayload += 
   "0000000000000000000000000000000000000000000000000000000000000020";
@@ -301,7 +301,8 @@ void exe() {
       Serial.print("Salvato su IPFS! CID generato: ");
       Serial.println(cid);
       String resultSendTx = inviaSuEthereum(cid);
-      delay(120000); // Attendere 5 secondi per la propagazione della transazione
+      Serial.println("Attendere 2 minuti per la propagazione della transazione sulla blockchain Ethereum...");
+      delay(120000); // Attendere 2 minuti per la propagazione della transazione
       String inputData = getTransazione(resultSendTx);
       String estrattoCID = estraiCID(inputData);
       Serial.print("CID estratto dalla transazione Ethereum: ");
