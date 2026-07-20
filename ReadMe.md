@@ -13,8 +13,8 @@ Il sistema opera secondo il seguente flusso:
 1. **Attivazione del sistema:** La pressione di un pulsante avvia il processo esecutivo: `exe()`.
 2. **Acquisizione Dati:** L'ESP32 legge la temperatura dal sensore DHT11 e ottiene il timestamp esatto tramite il server NTP.
 3. **Storage su IPFS:** I dati vengono serializzati in formato JSON e caricati sulla rete IPFS utilizzando l'API di Pinata che restituirà il **C**ontent **ID**entifier.
-4. **Caricamento su Blockchain:** Il CID restituito da IPFS viene inviato allo Smart Contract caricato su Ethereum Sepolia (chainID=11155111) firmando localmente una transazione crittografica.
-5. **Verifica:** Il sistema interroga l'endpoint RPC per confermare il successo della transazione, legge l'ultimo CID aggiornato dallo Smart Contract e scarica nuovamente il dato da IPFS per verifica.
+4. **Caricamento su Blockchain:** Viene generata e firmata localmente una transazione crittografica contenente il CID restituito da IPFS. Questa transazione viene poi trasmessa alla rete Ethereum Sepolia (chainID=11155111), la quale eseguirà il codice della funzione `updateCID(_nuovoCID)` dello Smart Contract per memorizzare il dato.
+5. **Verifica:** Il sistema attende che il blocco si diffonda nella rete e interroga l'endpoint RPC per confermare il successo della transazione. Infine legge l'ultimo CID aggiornato dallo Smart Contract e scarica nuovamente il dato da IPFS per verifica.
 
 ## Dipendenze Software
 
@@ -44,6 +44,7 @@ const char* SECRET_PINATA_ENDPOINT_READ = "IL_TUO_ENDPOINT_PINATA"
 // Credenziali Ethereum Sepolia
 const char* SECRET_ETH_PRIVATE_KEY = "LaTuaChiavePrivata";
 const char* SECRET_RPC_URL = "https://eth-sepolia.g.alchemy.com/v2/TUO_PROJECT_ID";
+// Indirizzi del contratto su Sepolia
 const char* SECRET_CONTRACT_ADDRESS = "0xIndirizzoDelTuoSmartContract";
 const char* PUBLIC_ADDRESS = "0xTuoIndirizzoPubblico";
 const char* SECRET_CURRENT_CID_FUNCTION_ADDRESS = "0xCURRENT_CID_ADDRESS"; // Funzione currentCID() in formato Ascii HEX (4 byte)

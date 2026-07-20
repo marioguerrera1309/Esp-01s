@@ -3,7 +3,7 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include "time.h"
-#include <Web3.h>
+#include "Web3.h"
 #include <Contract.h>
 #include "secrets.h"
 const char* ssid = SECRET_SSID;
@@ -245,8 +245,8 @@ String inviaSuEthereum(String cid_IPFS) {
       datiPayload += "00";
   string hashTransazione = contract.SendTransaction(
       web3.EthGetTransactionCount(&indirizzoStr),
-      1000000000ULL,  // 1 Gwei
-      150000,         // Gas Limit
+      1000000000ULL,  // commissione transazione
+      150000,         // limite 
       &indirizzoDestinatario,
       &valoreEth,
       &datiPayload
