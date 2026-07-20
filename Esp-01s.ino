@@ -15,7 +15,8 @@ const int ledPin = 2;
 const int buttonPin = 12;
 // Configurazione IPFS
 const String pinataJWT = SECRET_PINATA_JWT;
-const char* pinataEndpoint = SECRET_PINATA_ENDPOINT;
+const char* pinataSendEndpoint = SECRET_PINATA_ENDPOINT_SEND;
+const char* pinataReadEndpoint = SECRET_PINATA_ENDPOINT_READ;
 // Server NTP per il Timestamp
 const char* ntpServer = "pool.ntp.org";
 const long  gmtOffset_sec = 3600; // Fuso orario italiano
@@ -91,7 +92,7 @@ void leggiDatiDaIPFS(String cid) {
   client.setInsecure(); 
   client.setHandshakeTimeout(30000); 
   HTTPClient http;
-  String url = "https://aqua-fashionable-grouse-350.mypinata.cloud/ipfs/" + cid;
+  String url = pinataReadEndpoint + cid;
   Serial.println("Scaricamento dati da IPFS: " + url);
   if (!http.begin(client, url)) {
     Serial.println("Errore inizializzazione HTTP");
@@ -218,8 +219,6 @@ String inviaSuEthereum(String cid_IPFS) {
   Web3 web3(11155111); // Connessione alla rete Sepolia
   Contract contract(&web3, indirizzoContratto); // Indirizzo del contratto
   contract.SetPrivateKey(chiavePrivata); // Imposta la chiave privata per firmare la transazione
-  //String firmaFunzione = "updateCID(string)";
-  //String parametri = "[\"" + cid_IPFS + "\"]"; 
   Serial.println("Firma e invio transazione in corso...");
   std::string indirizzoStr = std::string(indirizzoPubblico); // Convertiamo l'indirizzo pubblico in std::string
   std::string indirizzoMittente = std::string(indirizzoPubblico);
@@ -308,7 +307,7 @@ void exe() {
   if (WiFi.status() == WL_CONNECTED) {
     HTTPClient http;
     Serial.println("Inviando a IPFS tramite Pinata...");
-    http.begin(pinataEndpoint);
+    http.begin(pinataSendEndpoint);
     http.addHeader("Content-Type", "application/json");
     // Autenticazione con Bearer Token
     http.addHeader("Authorization", "Bearer " + pinataJWT); 
